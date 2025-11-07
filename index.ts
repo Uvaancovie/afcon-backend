@@ -7,6 +7,7 @@ import tournamentRoutes from './routes/tournaments';
 import matchRoutes from './routes/matches';
 import analyticsRoutes from './routes/analytics';
 import simulateRoutes from './routes/simulate';
+import goalScorersRoutes from './routes/goalScorers';
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/simulate', simulateRoutes);
+app.use('/api/goal-scorers', goalScorersRoutes);
 
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {

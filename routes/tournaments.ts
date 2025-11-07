@@ -2,33 +2,59 @@ import express, { Request, Response } from 'express';
 import Tournament from '../models/Tournament';
 import Team from '../models/Team';
 import Match from '../models/Match';
+import Player from '../models/Player';
+import { generateSquad, calculateTeamRating, generateManagerName } from '../services/playerGenerator';
 
 const router = express.Router();
 
-// Seed demo teams
+// Seed demo teams with full squads
 router.post('/seed', async (req: Request, res: Response) => {
   try {
-    console.log('Seeding teams...');
+    console.log('Seeding teams with squads...');
     
-    // Clear existing teams
+    // Clear existing teams and players
     await Team.deleteMany({});
-    console.log('Cleared existing teams');
+    await Player.deleteMany({});
+    console.log('Cleared existing teams and players');
     
     // Create 8 demo teams
-    const demoTeams = [
-      { name: 'Egypt', country: 'Egypt', repName: 'Manager 1', repEmail: 'egypt@example.com', confederation: 'CAF' },
-      { name: 'Nigeria', country: 'Nigeria', repName: 'Manager 2', repEmail: 'nigeria@example.com', confederation: 'CAF' },
-      { name: 'Senegal', country: 'Senegal', repName: 'Manager 3', repEmail: 'senegal@example.com', confederation: 'CAF' },
-      { name: 'Morocco', country: 'Morocco', repName: 'Manager 4', repEmail: 'morocco@example.com', confederation: 'CAF' },
-      { name: 'South Africa', country: 'South Africa', repName: 'Manager 5', repEmail: 'southafrica@example.com', confederation: 'CAF' },
-      { name: 'Ghana', country: 'Ghana', repName: 'Manager 6', repEmail: 'ghana@example.com', confederation: 'CAF' },
-      { name: 'Cameroon', country: 'Cameroon', repName: 'Manager 7', repEmail: 'cameroon@example.com', confederation: 'CAF' },
-      { name: 'Tunisia', country: 'Tunisia', repName: 'Manager 8', repEmail: 'tunisia@example.com', confederation: 'CAF' },
+    const demoTeamData = [
+      { name: 'Egypt', country: 'Egypt', repName: 'Mohamed El-Sayed', repEmail: 'egypt@afcon.com' },
+      { name: 'Nigeria', country: 'Nigeria', repName: 'Chukwu Okafor', repEmail: 'nigeria@afcon.com' },
+      { name: 'Senegal', country: 'Senegal', repName: 'Amadou Diallo', repEmail: 'senegal@afcon.com' },
+      { name: 'Morocco', country: 'Morocco', repName: 'Hassan Benali', repEmail: 'morocco@afcon.com' },
+      { name: 'South Africa', country: 'South Africa', repName: 'Thabo Mbeki', repEmail: 'southafrica@afcon.com' },
+      { name: 'Ghana', country: 'Ghana', repName: 'Kwame Mensah', repEmail: 'ghana@afcon.com' },
+      { name: 'Cameroon', country: 'Cameroon', repName: 'Samuel Eto\'o Jr', repEmail: 'cameroon@afcon.com' },
+      { name: 'Tunisia', country: 'Tunisia', repName: 'Omar Ben Ali', repEmail: 'tunisia@afcon.com' },
     ];
     
-    const createdTeams = await Team.insertMany(demoTeams);
-    console.log('Created teams:', createdTeams.length);
+    const createdTeams = [];
     
+    for (const teamData of demoTeamData) {
+      // Create team
+      const team = new Team({
+        ...teamData,
+        managerName: generateManagerName(),
+        confederation: 'CAF' as const,
+        rating: 0
+      });
+      await team.save();
+      
+      // Generate and save squad
+      const teamId = String(team._id);
+      const squadData = generateSquad(teamId, teamData.country);
+      const players = await Player.insertMany(squadData);
+      
+      // Calculate and update team rating
+      team.rating = calculateTeamRating(players);
+      await team.save();
+      
+      createdTeams.push(team);
+      console.log(`✅ Created ${team.name} with ${players.length} players (Rating: ${team.rating})`);
+    }
+    
+    console.log('All teams seeded successfully');
     res.status(201).json({ message: 'Teams seeded successfully', teams: createdTeams });
   } catch (error) {
     console.error('Seed error:', error);
