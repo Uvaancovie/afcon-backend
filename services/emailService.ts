@@ -1,45 +1,40 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_PORT = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : undefined;
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const FROM_EMAIL = process.env.FROM_EMAIL || 'no-reply@afcon.example.com';
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const FROM_EMAIL = process.env.FROM_EMAIL || 'African Nations League <onboarding@resend.dev>';
 
-let transporter: nodemailer.Transporter | null = null;
+let resend: Resend | null = null;
 
-if (SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS) {
-  transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465, // true for 465, false for other ports
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS
-    }
-  });
+if (RESEND_API_KEY) {
+  resend = new Resend(RESEND_API_KEY);
+  console.log('✅ Resend email service configured');
 } else {
-  console.warn('Email service not fully configured. Set SMTP_HOST/PORT/USER/PASS to enable email notifications.');
+  console.warn('⚠️ Email service not configured. Set RESEND_API_KEY to enable email notifications.');
 }
 
 export const sendEmail = async (to: string | string[], subject: string, html: string) => {
-  if (!transporter) {
-    console.info('sendEmail skipped (no transporter configured).', { to, subject });
+  if (!resend) {
+    console.info('sendEmail skipped (no Resend configured).', { to, subject });
     return;
   }
 
   try {
-    const info = await transporter.sendMail({
+    const { data, error } = await resend.emails.send({
       from: FROM_EMAIL,
-      to,
+      to: Array.isArray(to) ? to : [to],
       subject,
       html
     });
-    console.log('Email sent:', info.messageId);
+    
+    if (error) {
+      console.error('Failed to send email:', error);
+    } else {
+      console.log('✅ Email sent:', data?.id);
+    }
   } catch (err) {
     console.error('Failed to send email:', err);
   }

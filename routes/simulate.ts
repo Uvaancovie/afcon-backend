@@ -170,7 +170,17 @@ router.post('/round/:tournamentId', async (req: Request, res: Response) => {
         }
       }
 
-      results.push({ matchId: m._id, scoreA: m.scoreA, scoreB: m.scoreB, goals: simulation.goals.length });
+      results.push({ 
+        matchId: m._id, 
+        teamA: m.teamA,
+        teamB: m.teamB,
+        scoreA: m.scoreA, 
+        scoreB: m.scoreB, 
+        winner: m.winner,
+        goals: simulation.goals.length,
+        playByPlay: simulation.playByPlay,
+        commentary: simulation.commentary
+      });
     }
 
     res.json({ tournamentId: tournament._id, results });
@@ -247,14 +257,26 @@ async function simulateMatch(
   const fulltimeCommentary = await generateCommentary('fulltime', homeTeam, awayTeam, 90);
   playByPlay.push(fulltimeCommentary);
 
-  // Determine winner
+  // Determine winner - for knockout stages, handle draws with penalties
   let winner;
   if (homeTeam.score > awayTeam.score) {
     winner = match.teamA;
   } else if (awayTeam.score > homeTeam.score) {
     winner = match.teamB;
   } else {
-    winner = 'Draw';
+    // In knockout stages (QF, SF, Final), we need a winner
+    const isKnockout = match.stage === 'quarter_finals' || match.stage === 'semi_finals' || match.stage === 'final';
+    
+    if (isKnockout) {
+      // Decide winner by penalty shootout
+      const penaltyWinner = Math.random() < 0.5 ? match.teamA : match.teamB;
+      winner = penaltyWinner;
+      
+      const penaltyCommentary = `⚽ The match is level after 90 minutes! Penalty shootout: ${penaltyWinner} wins the shootout and advances!`;
+      playByPlay.push(penaltyCommentary);
+    } else {
+      winner = 'Draw';
+    }
   }
 
   return {

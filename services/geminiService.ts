@@ -1,5 +1,4 @@
-
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -12,19 +11,17 @@ interface Team {
 // Ensure environment variables are loaded from server directory
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
-const API_KEY = process.env.GEMINI_API_KEY;
+const API_KEY = process.env.GROQ_API_KEY;
 
-console.log('🔑 Gemini API Key loaded:', API_KEY ? `${API_KEY.substring(0, 10)}...` : 'NOT FOUND');
+console.log('🔑 Groq API Key loaded:', API_KEY ? `${API_KEY.substring(0, 10)}...` : 'NOT FOUND');
 console.log('📂 Current directory:', __dirname);
 
 if (!API_KEY) {
-  console.error("❌ GEMINI_API_KEY is not set in environment variables. Gemini API calls will fail.");
-  console.error("Current env keys:", Object.keys(process.env).filter(k => k.includes('GEMINI')));
+  console.error("❌ GROQ_API_KEY is not set in environment variables. Groq API calls will fail.");
+  console.error("Current env keys:", Object.keys(process.env).filter(k => k.includes('GROQ')));
 }
 
-const ai = new GoogleGenerativeAI(API_KEY || 'dummy-key');
-// Using gemini-2.5-flash-lite for faster, more efficient responses
-const model = ai.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+const groq = new Groq({ apiKey: API_KEY || 'dummy-key' });
 
 const getPrompt = (
   type: 'goal' | 'event' | 'kickoff' | 'halftime' | 'fulltime',
@@ -58,16 +55,27 @@ export const generateCommentary = async (
 ): Promise<string> => {
   try {
     if (!API_KEY || API_KEY === 'dummy-key') {
-      console.warn('⚠️ Gemini API key not configured, using fallback commentary');
+      console.warn('⚠️ Groq API key not configured, using fallback commentary');
       return getFallbackCommentary(type, homeTeam, awayTeam, time);
     }
     
     const prompt = getPrompt(type, homeTeam, awayTeam, time);
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.8,
+      max_tokens: 100
+    });
+    
+    return completion.choices[0]?.message?.content || getFallbackCommentary(type, homeTeam, awayTeam, time);
   } catch (error) {
-    console.error('Error calling Gemini API:', error);
+    console.error('Error calling Groq API:', error);
     console.warn('Falling back to default commentary');
     return getFallbackCommentary(type, homeTeam, awayTeam, time);
   }

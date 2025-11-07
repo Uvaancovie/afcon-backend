@@ -167,4 +167,116 @@ router.post('/reset', async (req: Request, res: Response) => {
   }
 });
 
+// Advance tournament to next stage
+router.post('/advance/:tournamentId', async (req: Request, res: Response) => {
+  try {
+    const { tournamentId } = req.params;
+    const tournament = await Tournament.findById(tournamentId);
+    
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+
+    // Get completed matches from current stage
+    const currentStage = tournament.stage;
+    const completedMatches = await Match.find({ 
+      tournamentId: tournament._id, 
+      stage: currentStage,
+      status: 'completed'
+    });
+
+    if (completedMatches.length === 0) {
+      return res.status(400).json({ error: 'No completed matches in current stage' });
+    }
+
+    // Get winners
+    const winners = completedMatches
+      .filter(m => m.winner && m.winner !== 'Draw')
+      .map(m => m.winner);
+
+    // For knockout stages, we should never have draws, but handle it gracefully
+    if (winners.length < completedMatches.length) {
+      const drawMatches = completedMatches.filter(m => !m.winner || m.winner === 'Draw');
+      console.error('Found matches without winners:', drawMatches.map(m => `${m.teamA} vs ${m.teamB}`));
+      
+      // If we're in a knockout stage, this is a critical error
+      if (currentStage === 'quarter_finals' || currentStage === 'semi_finals') {
+        return res.status(400).json({ 
+          error: 'Knockout matches cannot end in draws. Please re-simulate the match.',
+          matches: drawMatches.map(m => ({ id: m._id, teamA: m.teamA, teamB: m.teamB }))
+        });
+      }
+    }
+
+    // Ensure we have the right number of winners for advancement
+    const expectedWinners = currentStage === 'quarter_finals' ? 4 : currentStage === 'semi_finals' ? 2 : 1;
+    if (winners.length !== expectedWinners) {
+      return res.status(400).json({ 
+        error: `Expected ${expectedWinners} winners but got ${winners.length}. Current stage: ${currentStage}`,
+        winners
+      });
+    }
+
+    let nextStage: 'semi_finals' | 'final' | null = null;
+    let matchesCreated: any[] = [];
+
+    if (currentStage === 'quarter_finals' && winners.length === 4) {
+      // Create semi-finals
+      nextStage = 'semi_finals';
+      for (let i = 0; i < 2; i++) {
+        const match = new Match({
+          tournamentId: tournament._id,
+          stage: 'semi_finals',
+          matchNumber: i + 1,
+          teamA: winners[i * 2],
+          teamB: winners[i * 2 + 1],
+          status: 'pending'
+        });
+        await match.save();
+        matchesCreated.push(match);
+        console.log(`Semi-Final ${i + 1}: ${match.teamA} vs ${match.teamB}`);
+      }
+    } else if (currentStage === 'semi_finals' && winners.length === 2) {
+      // Create final
+      nextStage = 'final';
+      const match = new Match({
+        tournamentId: tournament._id,
+        stage: 'final',
+        matchNumber: 1,
+        teamA: winners[0],
+        teamB: winners[1],
+        status: 'pending'
+      });
+      await match.save();
+      matchesCreated.push(match);
+      console.log(`Final: ${match.teamA} vs ${match.teamB}`);
+    } else if (currentStage === 'final') {
+      tournament.status = 'completed';
+      await tournament.save();
+      return res.json({ 
+        message: 'Tournament completed!',
+        tournament,
+        winner: winners[0]
+      });
+    }
+
+    if (nextStage) {
+      tournament.stage = nextStage;
+      await tournament.save();
+    }
+
+    res.json({
+      message: `Advanced to ${nextStage}`,
+      tournament,
+      matches: matchesCreated
+    });
+  } catch (error) {
+    console.error('Advance tournament error:', error);
+    res.status(500).json({ 
+      error: 'Failed to advance tournament',
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
 export default router;
