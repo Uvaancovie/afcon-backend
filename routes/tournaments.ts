@@ -17,7 +17,7 @@ router.post('/seed', async (req: Request, res: Response) => {
     await Player.deleteMany({});
     console.log('Cleared existing teams and players');
     
-    // Create 8 demo teams
+    // Create 7 demo teams (8th team should be registered manually for demo)
     const demoTeamData = [
       { name: 'Egypt', country: 'Egypt', repName: 'Mohamed El-Sayed', repEmail: 'egypt@afcon.com' },
       { name: 'Nigeria', country: 'Nigeria', repName: 'Chukwu Okafor', repEmail: 'nigeria@afcon.com' },
@@ -26,7 +26,6 @@ router.post('/seed', async (req: Request, res: Response) => {
       { name: 'South Africa', country: 'South Africa', repName: 'Thabo Mbeki', repEmail: 'southafrica@afcon.com' },
       { name: 'Ghana', country: 'Ghana', repName: 'Kwame Mensah', repEmail: 'ghana@afcon.com' },
       { name: 'Cameroon', country: 'Cameroon', repName: 'Samuel Eto\'o Jr', repEmail: 'cameroon@afcon.com' },
-      { name: 'Tunisia', country: 'Tunisia', repName: 'Omar Ben Ali', repEmail: 'tunisia@afcon.com' },
     ];
     
     const createdTeams = [];
@@ -54,8 +53,12 @@ router.post('/seed', async (req: Request, res: Response) => {
       console.log(`✅ Created ${team.name} with ${players.length} players (Rating: ${team.rating})`);
     }
     
-    console.log('All teams seeded successfully');
-    res.status(201).json({ message: 'Teams seeded successfully', teams: createdTeams });
+    console.log(`Seeded ${createdTeams.length} teams successfully. Ready for 8th team registration.`);
+    res.status(201).json({ 
+      message: `${createdTeams.length} teams seeded successfully. Register one more team to reach 8 teams.`, 
+      teams: createdTeams,
+      teamsCount: createdTeams.length
+    });
   } catch (error) {
     console.error('Seed error:', error);
     res.status(500).json({ error: 'Failed to seed teams', details: error instanceof Error ? error.message : String(error) });
