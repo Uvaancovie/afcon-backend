@@ -8,7 +8,7 @@ import matchRoutes from './routes/matches';
 import analyticsRoutes from './routes/analytics';
 import simulateRoutes from './routes/simulate';
 
-dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 const app: Express = express();
 const PORT = process.env.PORT || 3001;
