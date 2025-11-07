@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import Match from '../models/Match';
 import Tournament from '../models/Tournament';
-import { generateCommentary } from '../../services/geminiService';
+import { generateCommentary } from '../services/geminiService';
 
 const router = express.Router();
 
