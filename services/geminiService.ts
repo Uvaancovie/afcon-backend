@@ -1,10 +1,15 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { Team } from '../types';
 import dotenv from 'dotenv';
 
+// Define Team interface locally
+interface Team {
+  name: string;
+  score?: number;
+}
+
 // Ensure environment variables are loaded
-dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 const API_KEY = process.env.GEMINI_API_KEY;
 
