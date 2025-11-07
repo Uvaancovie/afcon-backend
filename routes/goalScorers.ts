@@ -3,6 +3,41 @@ import GoalScorer from '../models/GoalScorer';
 
 const router = express.Router();
 
+// Get all goal scorers (default endpoint)
+router.get('/', async (req: Request, res: Response) => {
+  try {
+    // Get all goal scorers across all tournaments
+    const leaderboard = await GoalScorer.aggregate([
+      {
+        $group: {
+          _id: { playerName: '$playerName', teamName: '$teamName' },
+          goals: { $sum: 1 },
+          playerName: { $first: '$playerName' },
+          teamName: { $first: '$teamName' },
+          penalties: { $sum: { $cond: ['$isPenalty', 1, 0] } },
+          minutes: { $push: '$minute' }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          playerName: 1,
+          teamName: 1,
+          goals: 1,
+          penalties: 1,
+          minutes: 1
+        }
+      },
+      { $sort: { goals: -1, penalties: 1 } }
+    ]);
+    
+    res.json(leaderboard);
+  } catch (error) {
+    console.error('Goal scorers error:', error);
+    res.status(500).json({ error: 'Failed to fetch goal scorers' });
+  }
+});
+
 // Get goal scorers leaderboard for a tournament
 router.get('/tournament/:tournamentId', async (req: Request, res: Response) => {
   try {

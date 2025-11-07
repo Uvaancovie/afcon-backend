@@ -23,8 +23,8 @@ if (!API_KEY) {
 }
 
 const ai = new GoogleGenerativeAI(API_KEY || 'dummy-key');
-// Using gemini-pro as it's more widely available
-const model = ai.getGenerativeModel({ model: "gemini-pro" });
+// Using gemini-2.5-flash-lite for faster, more efficient responses
+const model = ai.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
 const getPrompt = (
   type: 'goal' | 'event' | 'kickoff' | 'halftime' | 'fulltime',
@@ -36,17 +36,17 @@ const getPrompt = (
   
   switch (type) {
     case 'kickoff':
-      return `Generate a short, exciting opening commentary for a soccer match between ${homeTeam.name} and ${awayTeam.name}. The atmosphere is electric.`;
+      return `Generate a short, exciting opening commentary for a soccer match between ${homeTeam.name} and ${awayTeam.name}. The atmosphere is electric. Keep it under 20 words.`;
     case 'goal':
-      return `Generate a short, very exciting soccer commentary for a goal. The current score is ${score} at ${time} minutes. Describe the goal in a dramatic way. Keep it under 30 words.`;
+      return `Generate a short, very exciting soccer commentary for a goal. The current score is ${score} at ${time} minutes. Describe the goal dramatically. Keep it under 25 words.`;
     case 'event':
-      return `Generate a short, insightful piece of soccer commentary. The match is between ${homeTeam.name} and ${awayTeam.name}. The score is ${score} at ${time} minutes. Mention a near-miss, a great save, a skillful play, or rising tension. Keep it under 25 words.`;
+      return `Generate a short soccer commentary. Match: ${homeTeam.name} vs ${awayTeam.name}. Score: ${score} at ${time} minutes. Mention a near-miss, great save, or skillful play. Keep it under 20 words.`;
     case 'halftime':
-       return `Generate a brief summary commentary for halftime. The score is ${score}. Mention which team has the momentum and what the other team needs to do in the second half.`;
+       return `Generate a brief halftime summary. Score: ${score}. Mention which team has momentum and what to expect in second half. Keep it under 30 words.`;
     case 'fulltime':
-        return `Generate a concluding commentary for the end of a soccer match. The final score is ${score}. Summarize the result and the key moments of the game.`;
+        return `Generate a concluding commentary for the match. Final score: ${score}. Summarize the result and key moments. Keep it under 35 words.`;
     default:
-      return `Describe a generic event in a soccer match between ${homeTeam.name} and ${awayTeam.name}. The score is ${score}.`;
+      return `Describe a generic event in a soccer match between ${homeTeam.name} and ${awayTeam.name}. The score is ${score}. Keep it under 20 words.`;
   }
 };
 
@@ -57,11 +57,43 @@ export const generateCommentary = async (
   time: number
 ): Promise<string> => {
   try {
+    if (!API_KEY || API_KEY === 'dummy-key') {
+      console.warn('⚠️ Gemini API key not configured, using fallback commentary');
+      return getFallbackCommentary(type, homeTeam, awayTeam, time);
+    }
+    
     const prompt = getPrompt(type, homeTeam, awayTeam, time);
-    const response = await model.generateContent(prompt);
-    return response.response.text();
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
   } catch (error) {
     console.error('Error calling Gemini API:', error);
-    throw new Error('Failed to generate commentary from Gemini API.');
+    console.warn('Falling back to default commentary');
+    return getFallbackCommentary(type, homeTeam, awayTeam, time);
+  }
+};
+
+// Fallback commentary when API fails
+const getFallbackCommentary = (
+  type: 'goal' | 'event' | 'kickoff' | 'halftime' | 'fulltime',
+  homeTeam: Team,
+  awayTeam: Team,
+  time: number
+): string => {
+  const score = `${homeTeam.score ?? 0}-${awayTeam.score ?? 0}`;
+  
+  switch (type) {
+    case 'kickoff':
+      return `The match between ${homeTeam.name} and ${awayTeam.name} is underway! Both teams looking sharp.`;
+    case 'goal':
+      return `GOAL! What a strike! ${homeTeam.name} ${homeTeam.score} - ${awayTeam.score} ${awayTeam.name} at ${time} minutes!`;
+    case 'event':
+      return `Brilliant play at ${time} minutes! The crowd is on their feet as the action intensifies.`;
+    case 'halftime':
+      return `Half-time: ${homeTeam.name} ${score} ${awayTeam.name}. An exciting first half with plenty more to come!`;
+    case 'fulltime':
+      return `Full-time! ${homeTeam.name} ${score} ${awayTeam.name}. What a match! Both teams gave it their all.`;
+    default:
+      return `Exciting action between ${homeTeam.name} and ${awayTeam.name}!`;
   }
 };
