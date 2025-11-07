@@ -1,14 +1,20 @@
 import express, { Request, Response } from 'express';
 import Match from '../models/Match';
+import GoalScorer from '../models/GoalScorer';
+import Player from '../models/Player';
+import Team from '../models/Team';
 import Tournament from '../models/Tournament';
 import { generateCommentary } from '../services/geminiService';
+import { sendMatchResultEmail } from '../services/emailService';
 
 const router = express.Router();
 
-// Simulate a single match with Gemini AI
-router.post('/match/:matchId', async (req: Request, res: Response) => {
+// Simulate a match
+router.post('/:matchId', async (req: Request, res: Response) => {
   try {
-    const match = await Match.findById(req.params.matchId);
+    const { matchId } = req.params;
+    const match = await Match.findById(matchId);
+
     if (!match) {
       return res.status(404).json({ error: 'Match not found' });
     }
@@ -17,213 +23,248 @@ router.post('/match/:matchId', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Match already completed' });
     }
 
-    // Update match status
-    match.status = 'in_progress';
+    // Get teams and players
+    const teamA = await Team.findOne({ name: match.teamA });
+    const teamB = await Team.findOne({ name: match.teamB });
+
+    if (!teamA || !teamB) {
+      return res.status(404).json({ error: 'Teams not found' });
+    }
+
+    const playersA = await Player.find({ teamId: teamA._id });
+    const playersB = await Player.find({ teamId: teamB._id });
+
+    // Get tournament
+    const tournament = await Tournament.findById(match.tournamentId);
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+
+    // Simulate match
+    const simulation = await simulateMatch(match, teamA, teamB, playersA, playersB, tournament);
+
+    // Update match
+    match.scoreA = simulation.scoreA;
+    match.scoreB = simulation.scoreB;
+    match.winner = simulation.winner;
+    match.goals = simulation.goals;
+    match.commentary = simulation.commentary;
+    match.playByPlay = simulation.playByPlay;
+    match.status = 'completed';
+    match.matchType = 'simulated';
+    match.completedAt = Date.now();
+
     await match.save();
 
-    // Simulate match using Poisson distribution
-    const baseRate = 1.5;
-    const scoreA = Math.floor(Math.random() * (baseRate * 2)) + Math.floor(Math.random() * 2);
-    const scoreB = Math.floor(Math.random() * (baseRate * 2)) + Math.floor(Math.random() * 2);
+    // Create goal scorer documents
+    for (const goal of simulation.goals) {
+      const player = goal.teamName === match.teamA
+        ? playersA.find(p => p.name === goal.playerName)
+        : playersB.find(p => p.name === goal.playerName);
 
-    // Determine winner
-    let finalScoreA = scoreA;
-    let finalScoreB = scoreB;
-    let winner = '';
-
-    if (scoreA > scoreB) {
-      winner = match.teamA;
-    } else if (scoreB > scoreA) {
-      winner = match.teamB;
-    } else {
-      // Handle draw - add extra time goals
-      const extraA = Math.random() > 0.5 ? 1 : 0;
-      const extraB = Math.random() > 0.5 ? 1 : 0;
-      finalScoreA += extraA;
-      finalScoreB += extraB;
-      
-      if (finalScoreA > finalScoreB) {
-        winner = match.teamA;
-      } else if (finalScoreB > finalScoreA) {
-        winner = match.teamB;
-      } else {
-        // Penalty shootout
-        winner = Math.random() > 0.5 ? match.teamA : match.teamB;
+      if (player) {
+        const goalScorer = new GoalScorer({
+          matchId: match._id,
+          tournamentId: tournament._id,
+          playerId: player._id,
+          playerName: goal.playerName,
+          teamId: goal.teamName === match.teamA ? teamA._id : teamB._id,
+          teamName: goal.teamName,
+          minute: goal.minute,
+          isPenalty: goal.isPenalty,
+          isOwnGoal: false
+        });
+        await goalScorer.save();
       }
     }
 
-      // Generate AI commentary
-      let commentary = `${match.teamA} ${finalScoreA} - ${finalScoreB} ${match.teamB}. Winner: ${winner}`;
-      try {
-        commentary = await generateCommentary(
-          'fulltime',
-          { name: match.teamA, score: finalScoreA } as any,
-          { name: match.teamB, score: finalScoreB } as any,
-          90
-        );
-      } catch (error) {
-        console.warn('Failed to generate AI commentary, using fallback:', error instanceof Error ? error.message : String(error));
-      }    // Update match
-    match.scoreA = finalScoreA;
-    match.scoreB = finalScoreB;
-    match.winner = winner;
-    match.commentary = commentary;
-    match.status = 'completed';
-    match.completedAt = Date.now();
-    await match.save();
+    // notify federations (emails) if available
+    try {
+      const homeTeamDoc = await Team.findOne({ name: match.teamA });
+      const awayTeamDoc = await Team.findOne({ name: match.teamB });
+      const goalsForEmail = simulation.goals.map((g: any) => ({ playerName: g.playerName, teamName: g.teamName, minute: g.minute }));
+      const summary = { home: match.teamA, away: match.teamB, scoreA: simulation.scoreA, scoreB: simulation.scoreB, goals: goalsForEmail };
+      const recipients: string[] = [];
+      if (homeTeamDoc && (homeTeamDoc as any).repEmail) recipients.push((homeTeamDoc as any).repEmail);
+      if (awayTeamDoc && (awayTeamDoc as any).repEmail) recipients.push((awayTeamDoc as any).repEmail);
+      if (recipients.length > 0) {
+        await sendMatchResultEmail(recipients, summary, (await Tournament.findById(match.tournamentId))?.name);
+      }
+    } catch (emailErr) {
+      console.warn('Failed to send match notification emails:', emailErr);
+    }
 
-    console.log(`Match completed: ${match.teamA} ${finalScoreA} - ${finalScoreB} ${match.teamB} (Winner: ${winner})`);
+    res.json({
+      match,
+      goalScorers: simulation.goals.length,
+      message: 'Match simulated successfully'
+    });
 
-    res.json({ match, commentary });
   } catch (error) {
-    console.error('Match simulation error:', error);
-    res.status(500).json({ 
+    console.error('Simulation error:', error);
+    res.status(500).json({
       error: 'Failed to simulate match',
       details: error instanceof Error ? error.message : String(error)
     });
   }
 });
-
-// Simulate entire tournament round
+// Simulate all pending matches for a tournament (round)
 router.post('/round/:tournamentId', async (req: Request, res: Response) => {
   try {
-    const tournament = await Tournament.findById(req.params.tournamentId);
+    const { tournamentId } = req.params;
+
+    const tournament = await Tournament.findById(tournamentId);
     if (!tournament) {
       return res.status(404).json({ error: 'Tournament not found' });
     }
 
-    // Get pending matches for current stage
-    const matches = await Match.find({
-      tournamentId: tournament._id,
-      stage: tournament.stage,
-      status: 'pending'
-    });
+    // Find pending matches for this tournament
+    const pendingMatches = await Match.find({ tournamentId: tournament._id, status: 'pending' }).sort({ matchNumber: 1 });
 
-    console.log(`Simulating ${matches.length} matches for ${tournament.stage}`);
+    const results: any[] = [];
 
-    const results = [];
-    for (const match of matches) {
-      // Simulate each match
-      match.status = 'in_progress';
-      await match.save();
-
-      const baseRate = 1.5;
-      const scoreA = Math.floor(Math.random() * (baseRate * 2)) + Math.floor(Math.random() * 2);
-      const scoreB = Math.floor(Math.random() * (baseRate * 2)) + Math.floor(Math.random() * 2);
-
-      let finalScoreA = scoreA;
-      let finalScoreB = scoreB;
-      let winner = '';
-
-      if (scoreA > scoreB) {
-        winner = match.teamA;
-      } else if (scoreB > scoreA) {
-        winner = match.teamB;
-      } else {
-        const extraA = Math.random() > 0.5 ? 1 : 0;
-        const extraB = Math.random() > 0.5 ? 1 : 0;
-        finalScoreA += extraA;
-        finalScoreB += extraB;
-        
-        if (finalScoreA > finalScoreB) {
-          winner = match.teamA;
-        } else if (finalScoreB > finalScoreA) {
-          winner = match.teamB;
-        } else {
-          winner = Math.random() > 0.5 ? match.teamA : match.teamB;
-        }
+    for (const m of pendingMatches) {
+      // Load teams and players
+      const teamA = await Team.findOne({ name: m.teamA });
+      const teamB = await Team.findOne({ name: m.teamB });
+      if (!teamA || !teamB) {
+        results.push({ matchId: m._id, error: 'Teams not found' });
+        continue;
       }
+      const playersA = await Player.find({ teamId: teamA._id });
+      const playersB = await Player.find({ teamId: teamB._id });
 
-      let commentary = `${match.teamA} ${finalScoreA} - ${finalScoreB} ${match.teamB}. Winner: ${winner}`;
-      try {
-        commentary = await generateCommentary(
-          'fulltime',
-          { name: match.teamA, score: finalScoreA } as any,
-          { name: match.teamB, score: finalScoreB } as any,
-          90
-        );
-      } catch (error) {
-        console.warn('Failed to generate AI commentary, using fallback:', error instanceof Error ? error.message : String(error));
-      }
+      const simulation = await simulateMatch(m, teamA, teamB, playersA, playersB, tournament);
 
-      match.scoreA = finalScoreA;
-      match.scoreB = finalScoreB;
-      match.winner = winner;
-      match.commentary = commentary;
-      match.status = 'completed';
-      match.completedAt = Date.now();
-      await match.save();
+      m.scoreA = simulation.scoreA;
+      m.scoreB = simulation.scoreB;
+      m.winner = simulation.winner;
+      m.goals = simulation.goals;
+      m.commentary = simulation.commentary;
+      m.playByPlay = simulation.playByPlay;
+      m.status = 'completed';
+      m.matchType = 'simulated';
+      m.completedAt = Date.now();
 
-      results.push({
-        match: `${match.teamA} ${finalScoreA} - ${finalScoreB} ${match.teamB}`,
-        winner
-      });
+      await m.save();
 
-      console.log(`✅ ${match.teamA} ${finalScoreA} - ${finalScoreB} ${match.teamB} (Winner: ${winner})`);
-    }
+      // create GoalScorer docs
+      for (const goal of simulation.goals) {
+        const player = goal.teamName === m.teamA
+          ? playersA.find(p => p.name === goal.playerName)
+          : playersB.find(p => p.name === goal.playerName);
 
-    // Check if round is complete and create next round
-    const allMatches = await Match.find({
-      tournamentId: tournament._id,
-      stage: tournament.stage
-    });
-
-    const allCompleted = allMatches.every(m => m.status === 'completed');
-
-    if (allCompleted) {
-      // Progress to next stage
-      if (tournament.stage === 'quarter_finals') {
-        tournament.stage = 'semi_finals';
-        
-        // Create semi-final matches
-        const winners = allMatches.map(m => m.winner).filter(Boolean);
-        for (let i = 0; i < 2; i++) {
-          const semiMatch = new Match({
+        if (player) {
+          const goalScorer = new GoalScorer({
+            matchId: m._id,
             tournamentId: tournament._id,
-            stage: 'semi_finals',
-            matchNumber: i + 1,
-            teamA: winners[i * 2],
-            teamB: winners[i * 2 + 1],
-            status: 'pending'
+            playerId: player._id,
+            playerName: goal.playerName,
+            teamId: goal.teamName === m.teamA ? teamA._id : teamB._id,
+            teamName: goal.teamName,
+            minute: goal.minute,
+            isPenalty: goal.isPenalty,
+            isOwnGoal: false
           });
-          await semiMatch.save();
+          await goalScorer.save();
         }
-        console.log('Created semi-final matches');
-      } else if (tournament.stage === 'semi_finals') {
-        tournament.stage = 'final';
-        
-        // Create final match
-        const winners = allMatches.map(m => m.winner).filter(Boolean);
-        const finalMatch = new Match({
-          tournamentId: tournament._id,
-          stage: 'final',
-          matchNumber: 1,
-          teamA: winners[0],
-          teamB: winners[1],
-          status: 'pending'
-        });
-        await finalMatch.save();
-        console.log('Created final match');
-      } else if (tournament.stage === 'final') {
-        tournament.status = 'completed';
-        console.log('Tournament completed!');
       }
 
-      await tournament.save();
+      results.push({ matchId: m._id, scoreA: m.scoreA, scoreB: m.scoreB, goals: simulation.goals.length });
     }
 
-    res.json({ 
-      results, 
-      tournament,
-      nextStage: tournament.stage 
-    });
+    res.json({ tournamentId: tournament._id, results });
   } catch (error) {
-    console.error('Round simulation error:', error);
-    res.status(500).json({ 
-      error: 'Failed to simulate round',
-      details: error instanceof Error ? error.message : String(error)
-    });
+    console.error('Simulate round error:', error);
+    res.status(500).json({ error: 'Failed to simulate round', details: error instanceof Error ? error.message : String(error) });
   }
 });
+
+async function simulateMatch(
+  match: any,
+  teamA: any,
+  teamB: any,
+  playersA: any[],
+  playersB: any[],
+  tournament: any
+) {
+  const homeTeam = { name: match.teamA, score: 0 };
+  const awayTeam = { name: match.teamB, score: 0 };
+
+  // Generate kickoff commentary
+  const kickoffCommentary = await generateCommentary('kickoff', homeTeam, awayTeam, 0);
+
+  const goals: any[] = [];
+  const playByPlay: string[] = [kickoffCommentary];
+
+  // Simulate goals throughout the match
+  const totalGoals = Math.random() < 0.3 ? 0 : Math.floor(Math.random() * 6) + 1; // 0-6 goals
+
+  for (let i = 0; i < totalGoals; i++) {
+    const minute = Math.floor(Math.random() * 90) + 1;
+    const isPenalty = Math.random() < 0.1; // 10% chance of penalty
+
+    // Determine which team scores
+    const scoringTeam = Math.random() < 0.5 ? 'A' : 'B';
+    const team = scoringTeam === 'A' ? teamA : teamB;
+    const players = scoringTeam === 'A' ? playersA : playersB;
+    const opponentTeam = scoringTeam === 'A' ? awayTeam : homeTeam;
+
+    // Select a random attacking player
+    const attackingPlayers = players.filter(p => p.naturalPosition === 'AT' || p.naturalPosition === 'MD');
+    const scorer = attackingPlayers[Math.floor(Math.random() * attackingPlayers.length)];
+
+    if (scorer) {
+      // Update score
+      if (scoringTeam === 'A') {
+        homeTeam.score++;
+      } else {
+        awayTeam.score++;
+      }
+
+      // Add goal
+      goals.push({
+        playerName: scorer.name,
+        playerId: scorer._id,
+        teamName: team.name,
+        minute,
+        isPenalty
+      });
+
+      // Generate goal commentary
+      const goalCommentary = await generateCommentary('goal', homeTeam, awayTeam, minute);
+      playByPlay.push(goalCommentary);
+    }
+  }
+
+  // Generate halftime commentary if there were goals
+  if (goals.length > 0 && Math.random() < 0.7) {
+    const halftimeCommentary = await generateCommentary('halftime', homeTeam, awayTeam, 45);
+    playByPlay.push(halftimeCommentary);
+  }
+
+  // Generate fulltime commentary
+  const fulltimeCommentary = await generateCommentary('fulltime', homeTeam, awayTeam, 90);
+  playByPlay.push(fulltimeCommentary);
+
+  // Determine winner
+  let winner;
+  if (homeTeam.score > awayTeam.score) {
+    winner = match.teamA;
+  } else if (awayTeam.score > homeTeam.score) {
+    winner = match.teamB;
+  } else {
+    winner = 'Draw';
+  }
+
+  return {
+    scoreA: homeTeam.score,
+    scoreB: awayTeam.score,
+    winner,
+    goals,
+    commentary: fulltimeCommentary,
+    playByPlay
+  };
+}
 
 export default router;
