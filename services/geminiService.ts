@@ -1,6 +1,7 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
+import path from 'path';
 
 // Define Team interface locally
 interface Team {
@@ -8,10 +9,13 @@ interface Team {
   score?: number;
 }
 
-// Ensure environment variables are loaded
-dotenv.config();
+// Ensure environment variables are loaded from server directory
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const API_KEY = process.env.GEMINI_API_KEY;
+
+console.log('🔑 Gemini API Key loaded:', API_KEY ? `${API_KEY.substring(0, 10)}...` : 'NOT FOUND');
+console.log('📂 Current directory:', __dirname);
 
 if (!API_KEY) {
   console.error("❌ GEMINI_API_KEY is not set in environment variables. Gemini API calls will fail.");
@@ -19,7 +23,8 @@ if (!API_KEY) {
 }
 
 const ai = new GoogleGenerativeAI(API_KEY || 'dummy-key');
-const model = ai.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+// Using gemini-pro as it's more widely available
+const model = ai.getGenerativeModel({ model: "gemini-pro" });
 
 const getPrompt = (
   type: 'goal' | 'event' | 'kickoff' | 'halftime' | 'fulltime',
